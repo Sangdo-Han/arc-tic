@@ -10,7 +10,29 @@ def load_arc_json(fpath:str) -> dict:
         arc_dict = json.load(jsf)
     return arc_dict
 
-def convert_3d_cartesian(arr:np.array) -> tuple:
+# C x H x W (for torch shape, 10 x H x W)
+# input : 2d np.array with digit of colors
+def convert_to_onehot3d(arr:np.array, level:int=10) -> np.array:
+    out = np.zeros( (level, arr.size))
+    out[arr.ravel(), np.arange(arr.size)] = 1
+    out.shape = (level, ) + arr.shape
+    return out
+
+def pad_10x32x32(grid_10xhxw, pad_value=0, dtype=np.float32):
+    padded_grid = np.full((10,32,32), fill_value=0, dtype=dtype)
+    channel, height, width = grid_10xhxw.shape
+    padded_grid[:, :height, width] = grid_10xhxw
+    return padded_grid
+
+# return to 2d np.array with digits of colors
+def convert_onehot_to_origin(arr_3d:np.array, level:int=10) -> np.array:
+    pjt_arr = np.arange(level)
+    pjt_arr = pjt_arr[:, np.newaxis, np.newaxis]
+    arr_3d = arr_3d * pjt_arr # element-wise production
+    out = arr_3d.sum(axis=0)
+    return out
+
+def convert_to_xyz_points(arr:np.array) -> tuple:
     hex_colors = ['#000000', '#0074D9','#FF4136','#2ECC40','#FFDC00',
      '#AAAAAA', '#F012BE', '#FF851B', '#7FDBFF', '#870C25']
     y_len, x_len = arr.shape
@@ -60,10 +82,10 @@ def vis_train_in3d(
     )
 
     for sample_idx in range(n_samples):
-        xs_in,ys_in,zs_in,cs_in = convert_3d_cartesian(
+        xs_in,ys_in,zs_in,cs_in = convert_to_xyz_points(
             np.array(train_sample[sample_idx]['input'])
         )
-        xs_out,ys_out,zs_out,cs_out = convert_3d_cartesian(
+        xs_out,ys_out,zs_out,cs_out = convert_to_xyz_points(
             np.array(train_sample[sample_idx]['output'])
         )
 
