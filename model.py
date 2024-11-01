@@ -1,5 +1,4 @@
 from typing import Optional
-import numpy as np
 import torch
 from torch import nn
 from torch import functional as F
@@ -48,11 +47,11 @@ class ConvBlock(nn.Module):
 
         if mode=="down":
             self.conv = nn.Conv2d(
-                ch_in, ch_out, kernel_size=4, stride=2, padding=0
+                ch_in, ch_out, kernel_size=4, stride=2, padding=1
             )
         elif mode=="up":
             self.conv = nn.ConvTranspose2d(
-                ch_in, ch_out, kernel_size=4, stride=2, padding=0
+                ch_in, ch_out, kernel_size=4, stride=2, padding=1
             )
         else: # same
             self.conv = nn.Conv2d(
@@ -70,14 +69,14 @@ class ConvBlock(nn.Module):
 
 
 class UpEncoder(nn.Module):
-    def __init__(self, channels=[10, 10, 10], latent_dim=10, dropout=0.1):
+    def __init__(self, channels=[11, 11, 11], latent_dim=1024, dropout=0.1):
         super(UpEncoder, self).__init__()
-        self.conv1 = ConvBlock("up", 10,  channels[0], dropout)
+        self.conv1 = ConvBlock("up", 11,  channels[0], dropout)
         self.res12 = ResBlock(channels[0], dropout)
-        self.conv2 = ConvBlock("up", channels[0], channels[1], dropout)
+        self.conv2 = ConvBlock("same", channels[0], channels[1], dropout)
         self.res23 = ResBlock(channels[1], dropout)
         self.conv3 = ConvBlock("up", channels[1], channels[2], dropout)
-        self.fc = nn.Linear(channels[2] * 38 * 38, latent_dim)
+        self.fc = nn.Linear(channels[2] * 128 * 128, latent_dim)
 
     def forward(self, x):
         residuals = [0] * 3
@@ -89,26 +88,25 @@ class UpEncoder(nn.Module):
         residuals[1] = x
         x = self.conv3(x)
         residuals[2] = x
-        print(f"xshape: {x.shape}")
         x = x.reshape(x.size(0), -1)
         encoded = self.fc(x)
         return encoded, residuals
-    
-class Decoder(nn.Module):
-    def __init__(self, channels=[256, 512, 512], latent_dim=512, dropout=0.1):
-        super(Decoder, self).__init__()
+
+class DownDecoder(nn.Module):
+    def __init__(self, channels=[11, 11, 11], latent_dim=1024, dropout=0.1):
+        super(DownDecoder, self).__init__()
         self.channels = channels
-        self.fc = nn.Linear(latent_dim, channels[-1] * 2 * 2)
-        self.conv3 = ConvBlock("up", channels[-1]*2, channels[-2], dropout)
+        self.fc = nn.Linear(latent_dim, channels[-1] * 128 * 128)
+        self.conv3 = ConvBlock("down", channels[-1]*2, channels[-2], dropout)
         self.res32 = ResBlock(channels[-2], dropout)
-        self.conv2 = ConvBlock("up", channels[-2]*2, channels[-3], dropout)
+        self.conv2 = ConvBlock("same", channels[-2]*2, channels[-3], dropout)
         self.res21 = ResBlock(channels[-3], dropout)
-        self.conv1 = ConvBlock("up", channels[-3]*2, channels[-3], dropout)
+        self.conv1 = ConvBlock("down", channels[-3]*2, channels[-3], dropout)
         self.conv0 = nn.Conv2d(channels[-3], 11, kernel_size=3, padding=1)
 
     def forward(self, z, residuals):
         x = self.fc(z)
-        x = x.reshape(x.size(0), self.channels[-1], 2, 2)  # Unflatten using reshape instead of view
+        x = x.reshape(x.size(0), self.channels[-1], 128, 128)  # Unflatten using reshape instead of view
         x = torch.cat((x, residuals[2]), dim=1)
         x = self.conv3(x)
         x = self.res32(x)
@@ -120,65 +118,25 @@ class Decoder(nn.Module):
         x = self.conv0(x)
         return x
 
+class OfflineEncoderDecoder(nn.Module):
+    def __init__(self, channels, latent_dim):
+        super(OfflineEncoderDecoder, self).__init__()
+        self.encoder = UpEncoder(channels=channels, latent_dim=latent_dim, dropout=0.1)
+        self.decoder = DownDecoder(channels=channels, latent_dim=latent_dim, dropout=0.1)
+    
+    def forward(self, x):
+        x_encoded, x_residuals = self.encoder(x)
+        x_pred = self.decoder(x_encoded, x_residuals)
+        return x_pred
 
-class Encoder(nn.Module):
-    def __init__(self, channels=[256, 512, 512], latent_dim=512, dropout=0.1):
-        super(Encoder, self).__init__()
-        self.conv1 = ConvBlock("down", 11,  channels[0], dropout)
-        self.res12 = ResBlock(channels[0], dropout)
-        self.conv2 = ConvBlock("down", channels[0], channels[1], dropout)
-        self.res23 = ResBlock(channels[1], dropout)
-        self.conv3 = ConvBlock("down", channels[1], channels[2], dropout)
-        self.fc = nn.Linear(channels[2] * 2 * 2, latent_dim)
-
-    def forward(self, z):
-        residuals = [0] * 3
-        x = preprocess_images(z)
-        x = self.conv1(x)
-        x = self.res12(x)
-        residuals[0] = x
-        x = self.conv2(x)
-        x = self.res23(x)
-        residuals[1] = x
-        x = self.conv3(x)
-        residuals[2] = x
-        x = x.reshape(x.size(0), -1)
-        encoded = self.fc(x)
-        return encoded, residuals
-class AttentionSolver(nn.Module):
+class OnlineAttentionSolver(nn.Module):
     def __init__(
             self,
+            latent_dim
         ):
-        super(AttentionSolver, self).__init__()
+        super(OnlineAttentionSolver, self).__init__()
 
-    
-class Decoder(nn.Module):
-    def __init__(self, channels=[256, 512, 512], latent_dim=512, dropout=0.1):
-        super(Decoder, self).__init__()
-        self.channels = channels
-        self.fc = nn.Linear(latent_dim, channels[-1] * 2 * 2)
-        self.conv3 = ConvBlock("up", channels[-1]*2, channels[-2], dropout)
-        self.res32 = ResBlock(channels[-2], dropout)
-        self.conv2 = ConvBlock("up", channels[-2]*2, channels[-3], dropout)
-        self.res21 = ResBlock(channels[-3], dropout)
-        self.conv1 = ConvBlock("up", channels[-3]*2, channels[-3], dropout)
-        self.conv0 = nn.Conv2d(channels[-3], 11, kernel_size=3, padding=1)
 
-    def forward(self, z, residuals):
-        x = self.fc(z)
-        x = x.reshape(x.size(0), self.channels[-1], 2, 2)  # Unflatten using reshape instead of view
-        x = torch.cat((x, residuals[2]), dim=1)
-        x = self.conv3(x)
-        x = self.res32(x)
-        x = torch.cat((x, residuals[1]), dim=1)
-        x = self.conv2(x)
-        x = self.res21(x)
-        x = torch.cat((x, residuals[0]), dim=1)
-        x = self.conv1(x)
-        x = self.conv0(x)
-        return x
-    
-    
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, dropout=0.1):
         super(MLP, self).__init__()
@@ -199,3 +157,55 @@ class MLP(nn.Module):
         x = self.dropout(x)
         output = self.fc3(x)
         return output
+
+# class Decoder(nn.Module):
+#     def __init__(self, channels=[256, 512, 512], latent_dim=512, dropout=0.1):
+#         super(Decoder, self).__init__()
+#         self.channels = channels
+#         self.fc = nn.Linear(latent_dim, channels[-1] * 2 * 2)
+#         self.conv3 = ConvBlock("up", channels[-1]*2, channels[-2], dropout)
+#         self.res32 = ResBlock(channels[-2], dropout)
+#         self.conv2 = ConvBlock("up", channels[-2]*2, channels[-3], dropout)
+#         self.res21 = ResBlock(channels[-3], dropout)
+#         self.conv1 = ConvBlock("up", channels[-3]*2, channels[-3], dropout)
+#         self.conv0 = nn.Conv2d(channels[-3], 11, kernel_size=3, padding=1)
+
+#     def forward(self, z, residuals):
+#         x = self.fc(z)
+#         x = x.reshape(x.size(0), self.channels[-1], 2, 2)
+#         x = torch.cat((x, residuals[2]), dim=1)
+#         x = self.conv3(x)
+#         x = self.res32(x)
+#         x = torch.cat((x, residuals[1]), dim=1)
+#         x = self.conv2(x)
+#         x = self.res21(x)
+#         x = torch.cat((x, residuals[0]), dim=1)
+#         x = self.conv1(x)
+#         x = self.conv0(x)
+#         return x
+
+
+# class Encoder(nn.Module):
+#     def __init__(self, channels=[256, 512, 512], latent_dim=512, dropout=0.1):
+#         super(Encoder, self).__init__()
+#         self.conv1 = ConvBlock("down", 11,  channels[0], dropout)
+#         self.res12 = ResBlock(channels[0], dropout)
+#         self.conv2 = ConvBlock("down", channels[0], channels[1], dropout)
+#         self.res23 = ResBlock(channels[1], dropout)
+#         self.conv3 = ConvBlock("down", channels[1], channels[2], dropout)
+#         self.fc = nn.Linear(channels[2] * 2 * 2, latent_dim)
+
+#     def forward(self, z):
+#         residuals = [0] * 3
+#         x = preprocess_images(z)
+#         x = self.conv1(x)
+#         x = self.res12(x)
+#         residuals[0] = x
+#         x = self.conv2(x)
+#         x = self.res23(x)
+#         residuals[1] = x
+#         x = self.conv3(x)
+#         residuals[2] = x
+#         x = x.reshape(x.size(0), -1)
+#         encoded = self.fc(x)
+#         return encoded, residuals

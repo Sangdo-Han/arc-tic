@@ -5,6 +5,9 @@ from matplotlib import colors
 import matplotlib.pyplot as plt
 from typing import Optional
 
+def identity_fn(x):
+    return x
+
 def load_arc_json(fpath:str) -> dict:
     with open(fpath, 'r') as jsf:
         arc_dict = json.load(jsf)
@@ -12,24 +15,26 @@ def load_arc_json(fpath:str) -> dict:
 
 # C x H x W (for torch shape, 10 x H x W)
 # input : 2d np.array with digit of colors
-def convert_to_onehot3d(arr:np.array, level:int=10) -> np.array:
+def convert_to_onehot3d(arr:np.array, level:int=11) -> np.array:
+    arr = arr + 1
     out = np.zeros( (level, arr.size))
     out[arr.ravel(), np.arange(arr.size)] = 1
     out.shape = (level, ) + arr.shape
     return out
 
-def pad_10x32x32(grid_10xhxw, pad_value=0, dtype=np.float32):
-    padded_grid = np.full((10,32,32), fill_value=0, dtype=dtype)
+def pad_11x32x32(grid_10xhxw, pad_value=0, dtype=np.float32):
+    padded_grid = np.full((11,32,32), fill_value=pad_value, dtype=dtype)
     channel, height, width = grid_10xhxw.shape
-    padded_grid[:, :height, width] = grid_10xhxw
+    padded_grid[:, :height, :width] = grid_10xhxw
     return padded_grid
 
 # return to 2d np.array with digits of colors
-def convert_onehot_to_origin(arr_3d:np.array, level:int=10) -> np.array:
+def convert_onehot_to_origin(arr_3d:np.array, level:int=11) -> np.array:
     pjt_arr = np.arange(level)
     pjt_arr = pjt_arr[:, np.newaxis, np.newaxis]
     arr_3d = arr_3d * pjt_arr # element-wise production
     out = arr_3d.sum(axis=0)
+    out = out -1
     return out
 
 def convert_to_xyz_points(arr:np.array) -> tuple:
